@@ -17,6 +17,8 @@ import LocationModal from './LocationModal.vue'
 import SkinMythsCard from './SkinMythsCard.vue'
 import SectionNav from './SectionNav.vue'
 import UVTimelineCard from './UVTimelineCard.vue'
+import UVTrendChart from './UVTrendChart.vue'
+import SkinCancerImpactChart from './SkinCancerImpactChart.vue'
 import { AlertTriangle, BookOpen } from 'lucide-vue-next'
 
 // ==== REACTIVE STATE ====
@@ -176,28 +178,51 @@ async function fetchUVData(lat, lon, preferredName = '') {
     }
 
     const apiKey = import.meta.env.VITE_OWM_KEY
+
+    if (!apiKey) {
+      throw new Error('Missing OpenWeatherMap API key. Add VITE_OWM_KEY to your .env file.')
+    }
+
     const url = `https://api.openweathermap.org/data/3.0/onecall?lat=${lat}&lon=${lon}&exclude=minutely,daily,alerts&appid=${apiKey}`
 
-    const response = await fetch(url)
-    if (!response.ok) throw new Error(`UV API request failed (${response.status})`)
+    console.log('onecall request:', url)
 
-    const data = await response.json()
+    const response = await fetch(url)
+    const data = await response.json().catch(() => null)
+
+    if (!response.ok) {
+      throw new Error(
+        `One Call request failed (${response.status}): ${data?.message || 'Unknown API error'}`
+      )
+    }
+
     if (typeof data?.current?.uvi !== 'number') {
       throw new Error('UV data missing in API response')
     }
+
     setCachedItem(uvDataCache, cacheKey, data)
     applyUvPayload(data, lat, lon)
 
     reverseGeocode(lat, lon, preferredName)
   } catch (err) {
     const message = err instanceof Error ? err.message : ''
-    if (message.includes('401')) {
-      errorMessage.value = 'API key is invalid. Please check OpenWeatherMap key configuration.'
+
+    console.error('fetchUVData error:', err)
+
+    if (message.includes('Missing OpenWeatherMap API key')) {
+      errorMessage.value = 'API key is missing. Add VITE_OWM_KEY to your .env file.'
+    } else if (message.includes('401') && message.toLowerCase().includes('one call')) {
+      errorMessage.value =
+        'Your OpenWeather key does not have access to One Call 3.0 yet. Check your subscription.'
+    } else if (message.includes('401')) {
+      errorMessage.value =
+        'Unauthorized request. Please check that your OpenWeather API key is correct and active.'
     } else if (message.includes('429')) {
       errorMessage.value = 'Too many requests right now. Please try again in a moment.'
     } else {
-      errorMessage.value = 'Unable to fetch UV data. Please check your connection and try again.'
+      errorMessage.value = message || 'Unable to fetch UV data. Please try again.'
     }
+
     error.value = true
     showData.value = false
   } finally {
@@ -245,12 +270,22 @@ async function reverseGeocode(lat, lon, preferredName = '') {
     }
 
     const apiKey = import.meta.env.VITE_OWM_KEY
+    if (!apiKey) {
+      throw new Error('Missing OpenWeatherMap API key')
+    }
+
     const url = `https://api.openweathermap.org/geo/1.0/reverse?lat=${lat}&lon=${lon}&limit=5&appid=${apiKey}`
+    console.log('reverse request:', url)
 
     const response = await fetch(url)
-    if (!response.ok) throw new Error('Geocoding failed')
+    const data = await response.json().catch(() => null)
 
-    const data = await response.json()
+    if (!response.ok) {
+      throw new Error(
+        `Reverse geocode failed (${response.status}): ${data?.message || 'Unknown API error'}`
+      )
+    }
+
     const best = pickMostPreciseLocation(data)
     if (best?.name) {
       const resolvedName = normalizeVicName(best.name)
@@ -262,11 +297,11 @@ async function reverseGeocode(lat, lon, preferredName = '') {
     if (preferredName) {
       locationName.value = preferredName
     }
-  } catch {
+  } catch (err) {
+    console.error('reverseGeocode error:', err)
     locationName.value = preferredName || 'Your Location'
   }
 }
-
 async function searchVictoriaLocations(query) {
   const normalized = query.trim()
   if (normalized.length < 2) {
@@ -291,17 +326,30 @@ async function searchVictoriaLocations(query) {
 
   try {
     const apiKey = import.meta.env.VITE_OWM_KEY
+    if (!apiKey) {
+      throw new Error('Missing OpenWeatherMap API key')
+    }
+
     const isPostcode = /^\d{4}$/.test(normalized)
     let results = []
 
     if (isPostcode) {
       const zipUrl = `https://api.openweathermap.org/geo/1.0/zip?zip=${normalized},AU&appid=${apiKey}`
+      console.log('zip request:', zipUrl)
+
       const response = await fetch(zipUrl, { signal: controller.signal })
-      if (!response.ok) throw new Error('Postcode lookup failed')
-      const data = await response.json()
+      const data = await response.json().catch(() => null)
+
+      if (!response.ok) {
+        throw new Error(
+          `ZIP lookup failed (${response.status}): ${data?.message || 'Unknown API error'}`
+        )
+      }
 
       if (isVictoriaCoordinate(data.lat, data.lon)) {
         const reverseUrl = `https://api.openweathermap.org/geo/1.0/reverse?lat=${data.lat}&lon=${data.lon}&limit=5&appid=${apiKey}`
+        console.log('reverse from zip request:', reverseUrl)
+
         const reverseResp = await fetch(reverseUrl, { signal: controller.signal })
         const reverseData = reverseResp.ok ? await reverseResp.json() : []
         const best = pickMostPreciseLocation(reverseData)
@@ -310,9 +358,16 @@ async function searchVictoriaLocations(query) {
       }
     } else {
       const directUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(`${normalized},AU`)}&limit=8&appid=${apiKey}`
+      console.log('direct request:', directUrl)
+
       const response = await fetch(directUrl, { signal: controller.signal })
-      if (!response.ok) throw new Error('Location lookup failed')
-      const data = await response.json()
+      const data = await response.json().catch(() => null)
+
+      if (!response.ok) {
+        throw new Error(
+          `Direct geocode failed (${response.status}): ${data?.message || 'Unknown API error'}`
+        )
+      }
 
       results = data
         .filter((item) => item.state === 'Victoria' || isVictoriaCoordinate(item.lat, item.lon))
@@ -328,6 +383,7 @@ async function searchVictoriaLocations(query) {
     setCachedItem(locationSearchCache, cacheKey, deduped)
   } catch (err) {
     if (!(err instanceof DOMException && err.name === 'AbortError')) {
+      console.error('searchVictoriaLocations error:', err)
       locationSearchResults.value = []
     }
   } finally {
@@ -595,6 +651,16 @@ watch([showData, loading, error], () => {
 
         <section id="tips-section" class="section-block reveal delay-1">
           <TipsCard :uv-level="currentUVLevel" :uv-severity="uvSeverity" />
+        </section>
+
+        <!-- UV Trend Visualization: UV Intensity and Heat Index in Melbourne over the Past 5 Years -->
+        <section id="trend-section" class="section-block reveal delay-1">
+          <UVTrendChart />
+        </section>
+
+        <!-- Skin Cancer Impact Visualization: Melanoma Risk Over Time -->
+        <section id="skin-cancer-impact-section" class="section-block reveal delay-1">
+          <SkinCancerImpactChart />
         </section>
 
         <section id="skin-section" class="section-block personal-path reveal delay-2">
@@ -1849,5 +1915,21 @@ watch([showData, loading, error], () => {
     font-size: 0.68rem;
     padding: 3px 6px;
   }
+}
+
+#skin-cancer-impact-section {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-width: 0;
+  padding: 0 0 32px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+  margin-bottom: 40px;
+}
+
+#trend-section {
+  grid-column: 1 / -1;
+  padding: 0 0 32px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+  margin-bottom: 40px;
 }
 </style>
