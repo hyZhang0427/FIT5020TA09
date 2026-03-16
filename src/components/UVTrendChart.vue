@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import {
   Chart,
   LineController,
@@ -11,7 +11,6 @@ import {
   Filler,
   Legend,
 } from 'chart.js'
-import { melbourneUVHeatTrends } from '../data/melbourneUVHeatTrends.js'
 
 Chart.register(
   LineController,
@@ -25,29 +24,33 @@ Chart.register(
 )
 
 const canvasRef = ref(null)
+const loading = ref(true)
+const error = ref('')
+const trendData = ref([])
+
 let chartInstance = null
 
-const labels = melbourneUVHeatTrends.map(
-  (d) => `${d.year}-${String(d.month).padStart(2, '0')}`
-)
-const uvData = melbourneUVHeatTrends.map((d) => d.uv)
-const heatData = melbourneUVHeatTrends.map((d) => d.heat)
-
-const peakIndices = melbourneUVHeatTrends
-  .map((item, index, arr) => {
-    const sameYear = arr.filter((d) => d.year === item.year)
-    const maxUv = Math.max(...sameYear.map((d) => d.uv))
-    return item.uv === maxUv ? index : null
-  })
-  .filter((i) => i !== null)
-
-function renderChart() {
-  if (!canvasRef.value) return
-
+function destroyChart() {
   if (chartInstance) {
     chartInstance.destroy()
     chartInstance = null
   }
+}
+
+function buildChart() {
+  if (!canvasRef.value || !trendData.value.length) return
+
+  destroyChart()
+
+  const labels = trendData.value.map(
+    (d) => `${d.year}-${String(d.month).padStart(2, '0')}`
+  )
+  const uvData = trendData.value.map((d) => d.uv)
+  const heatData = trendData.value.map((d) => d.heat)
+
+  const peakIndices = trendData.value
+    .map((d, i) => (d.isPeakUv ? i : null))
+    .filter((i) => i !== null)
 
   const ctx = canvasRef.value.getContext('2d')
 
@@ -70,8 +73,9 @@ function renderChart() {
           pointBorderColor: labels.map((_, i) =>
             peakIndices.includes(i) ? '#B58900' : '#E53210'
           ),
-          pointRadius: labels.map((_, i) => (peakIndices.includes(i) ? 7 : 4)),
+          pointRadius: labels.map((_, i) => (peakIndices.includes(i) ? 4 : 1)),
           pointHoverRadius: labels.map((_, i) => (peakIndices.includes(i) ? 8 : 5)),
+          borderWidth: 2.5,
         },
         {
           label: 'Heat Index',
@@ -81,8 +85,10 @@ function renderChart() {
           yAxisID: 'y1',
           tension: 0.3,
           fill: false,
-          pointRadius: 3,
+          pointRadius: 1,
+          pointHoverRadius: 5,
           spanGaps: true,
+          borderWidth: 2.5,
         },
       ],
     },
@@ -181,98 +187,74 @@ function renderChart() {
   })
 }
 
+async function fetchTrendData() {
+  try {
+    loading.value = true
+    error.value = ''
+
+    const response = await fetch('http://localhost:3001/api/uv-trends')
+    if (!response.ok) {
+      throw new Error(`Failed to fetch UV trends (${response.status})`)
+    }
+
+    const data = await response.json()
+    trendData.value = Array.isArray(data) ? data : []
+
+    if (!trendData.value.length) {
+      throw new Error('No UV trend data available')
+    }
+
+    loading.value = false
+    await nextTick()
+
+    buildChart()
+  } catch (err) {
+    error.value =
+      err instanceof Error ? err.message : 'Failed to load UV trend data'
+  } finally {
+    loading.value = false
+  }
+}
+
 onMounted(() => {
-  renderChart()
+  fetchTrendData()
 })
 
 onUnmounted(() => {
-  if (chartInstance) {
-    chartInstance.destroy()
-    chartInstance = null
-  }
+  destroyChart()
 })
 </script>
 
 <template>
-  <section class="chart-card reveal">
-    <div class="chart-header">
-      <p class="chart-kicker">UV Trend</p>
-      <h2 class="chart-title">Melbourne UV Intensity and Heat Index Trends</h2>
-      <p class="chart-subtitle">
+  <section class="dashboard-card uv-chart-card reveal">
+    <div class="card-header">
+      <p class="card-kicker">UV Trend</p>
+      <h2 class="card-title">Melbourne UV Intensity and Heat Index Trends</h2>
+      <p class="card-subtitle">
         View monthly UV intensity and heat index changes over the past 5 years.
         Yellow-highlighted points mark peak UV periods.
       </p>
     </div>
 
-    <div class="chart-wrap">
+    <div v-if="loading" class="chart-state">Loading chart data...</div>
+    <div v-else-if="error" class="chart-state error">{{ error }}</div>
+    <div v-else class="chart-wrap">
       <canvas ref="canvasRef"></canvas>
     </div>
-
-    <p class="chart-note">
+    <p v-if="!loading && !error" class="card-explanation">
+      <strong>Heat and UV rise together, which can make people stay outside longer and underestimate damage.</strong>
+    </p>
+    <p v-if="!loading && !error" class="card-note">
       Highlighted points: <strong>Peak UV periods</strong> for each year.
     </p>
   </section>
 </template>
 
 <style scoped>
-.chart-card {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  margin: 0 auto 24px;
-  padding: 18px;
-  border-radius: 14px;
-  background: rgba(255, 253, 250, 0.92);
-  box-shadow: 0 4px 18px rgba(15, 23, 42, 0.08);
-  box-sizing: border-box;
-}
-
-.chart-header {
-  margin-bottom: 14px;
-}
-
-.chart-kicker {
-  margin: 0 0 6px;
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #64748b;
-  font-weight: 700;
-}
-
-.chart-title {
-  margin: 0 0 8px;
-  font-size: clamp(1.05rem, 1.4vw, 1.35rem);
-  line-height: 1.25;
-  color: #0f172a;
-  font-weight: 800;
-}
-
-.chart-subtitle {
-  margin: 0;
-  font-size: 0.92rem;
-  line-height: 1.55;
+.card-explanation {
+  font-size: 1.5rem;
   color: #334155;
-}
-
-.chart-wrap {
-  position: relative;
-  width: 100%;
-  min-width: 0;
-  height: 340px;
-}
-
-.chart-wrap canvas {
-  display: block;
-  width: 100% !important;
-  height: 100% !important;
-}
-
-.chart-note {
-  margin: 10px 0 0;
-  font-size: 0.84rem;
-  line-height: 1.45;
-  color: #854d0e;
+  margin-top: 12px;
   font-weight: 600;
 }
 
@@ -281,8 +263,10 @@ onUnmounted(() => {
     padding: 14px;
   }
 
-  .chart-wrap {
+  .chart-wrap,
+  .chart-state {
     height: 300px;
+    min-height: 300px;
   }
 
   .chart-subtitle {
@@ -291,6 +275,10 @@ onUnmounted(() => {
 
   .chart-note {
     font-size: 0.8rem;
+  }
+
+  .card-explanation {
+    font-size: 1rem;
   }
 }
 </style>

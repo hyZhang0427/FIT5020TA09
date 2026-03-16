@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import {
   Chart,
   LineController,
@@ -10,7 +10,6 @@ import {
   Tooltip,
   Legend,
 } from 'chart.js'
-import { melanomaRiskOverTime } from '../data/skinCancerStats.js'
 
 Chart.register(
   LineController,
@@ -23,20 +22,28 @@ Chart.register(
 )
 
 const canvasRef = ref(null)
+const loading = ref(true)
+const error = ref('')
+const riskData = ref([])
+
 let chartInstance = null
 
-const labels = melanomaRiskOverTime.map((d) => d.year)
-const age30Data = melanomaRiskOverTime.map((d) => d.age30)
-const age60Data = melanomaRiskOverTime.map((d) => d.age60)
-const lifetimeData = melanomaRiskOverTime.map((d) => d.lifetime)
-
-function renderChart() {
-  if (!canvasRef.value) return
-
+function destroyChart() {
   if (chartInstance) {
     chartInstance.destroy()
     chartInstance = null
   }
+}
+
+function buildChart() {
+  if (!canvasRef.value || !riskData.value.length) return
+
+  destroyChart()
+
+  const labels = riskData.value.map((d) => d.year)
+  const age30Data = riskData.value.map((d) => d.age30)
+  const age60Data = riskData.value.map((d) => d.age60)
+  const lifetimeData = riskData.value.map((d) => d.lifetime)
 
   const ctx = canvasRef.value.getContext('2d')
 
@@ -55,7 +62,7 @@ function renderChart() {
           pointHoverBackgroundColor: '#FACC15',
           pointHoverBorderColor: '#CA8A04',
           borderWidth: 4,
-          pointRadius: 5,
+          pointRadius: 0.5,
           pointHoverRadius: 7,
           tension: 0.35,
           fill: false,
@@ -71,7 +78,7 @@ function renderChart() {
           pointHoverBackgroundColor: '#0284C7',
           pointHoverBorderColor: '#0369A1',
           borderWidth: 2.5,
-          pointRadius: 3,
+          pointRadius: 0.5,
           pointHoverRadius: 5,
           tension: 0.35,
           fill: false,
@@ -87,7 +94,7 @@ function renderChart() {
           pointHoverBackgroundColor: '#DC2626',
           pointHoverBorderColor: '#B91C1C',
           borderWidth: 2.5,
-          pointRadius: 3,
+          pointRadius: 0.5,
           pointHoverRadius: 5,
           tension: 0.35,
           fill: false,
@@ -175,99 +182,88 @@ function renderChart() {
   })
 }
 
+async function fetchRiskData() {
+  try {
+    loading.value = true
+    error.value = ''
+
+    const response = await fetch('http://localhost:3001/api/skin-cancer-stats')
+    if (!response.ok) {
+      throw new Error(`Failed to fetch skin cancer stats (${response.status})`)
+    }
+
+    const data = await response.json()
+    riskData.value = Array.isArray(data) ? data : []
+
+    if (!riskData.value.length) {
+      throw new Error('No skin cancer risk data available')
+    }
+    loading.value = false
+    await nextTick()
+    buildChart()
+  } catch (err) {
+    error.value =
+      err instanceof Error
+        ? err.message
+        : 'Failed to load skin cancer risk data'
+  } finally {
+    loading.value = false
+  }
+}
+
 onMounted(() => {
-  renderChart()
+  fetchRiskData()
 })
 
 onUnmounted(() => {
-  if (chartInstance) {
-    chartInstance.destroy()
-    chartInstance = null
-  }
+  destroyChart()
 })
 </script>
 
 <template>
-  <section class="skin-cancer-impact-chart reveal">
-    <div class="chart-header">
-      <p class="chart-kicker">Skin Cancer Impacts</p>
-      <h2 class="chart-title">Australia Melanoma Diagnosis Risk Over Time</h2>
-      <p class="chart-subtitle">
+  <section class="dashboard-card skin-chart-card reveal">
+    <div class="card-header">
+      <p class="card-kicker">Skin Cancer Impacts</p>
+      <h2 class="card-title">Australia Melanoma Diagnosis Risk Over Time</h2>
+      <p class="card-subtitle">
         Compare diagnosis risk by age 30, age 60, and lifetime risk. The highlighted
         yellow line emphasises the younger age benchmark.
       </p>
     </div>
 
-    <div class="chart-wrap">
+    <div v-if="loading" class="chart-state">Loading chart data...</div>
+    <div v-else-if="error" class="chart-state error">{{ error }}</div>
+    <div v-else class="chart-wrap">
       <canvas ref="canvasRef"></canvas>
     </div>
 
-    <p class="chart-note">
-      Highlighted series: <strong>Risk by Age 30</strong>, used to represent the younger group.
+    <p v-if="!loading && !error" class="card-explanation">
+      <strong>You may not feel high risk now, but your future skin health is being shaped by your current habits.</strong>
+    </p>
+
+    <p v-if="!loading && !error" class="card-note">
+      Highlighted series: Risk by Age 30, used to represent the younger group.
     </p>
   </section>
 </template>
 
 <style scoped>
-.skin-cancer-impact-chart {
-  width: min(100%, 980px);
-  margin: 0 auto 24px;
-  padding: 18px;
-  border-radius: 14px;
-  background: rgba(255, 253, 250, 0.92);
-  box-shadow: 0 4px 18px rgba(15, 23, 42, 0.08);
-  box-sizing: border-box;
-}
-
-.chart-header {
-  margin-bottom: 14px;
-}
-
-.chart-kicker {
-  margin: 0 0 6px;
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #64748b;
-  font-weight: 700;
-}
-
-.chart-title {
-  margin: 0 0 8px;
-  font-size: clamp(1.05rem, 1.4vw, 1.35rem);
-  line-height: 1.25;
-  color: #0f172a;
-  font-weight: 800;
-}
-
-.chart-subtitle {
-  margin: 0;
-  font-size: 0.92rem;
-  line-height: 1.55;
+.card-explanation {
+  font-size: 1.5rem;
   color: #334155;
-}
-
-.chart-wrap {
-  position: relative;
-  width: 100%;
-  height: 340px;
-}
-
-.chart-note {
-  margin: 10px 0 0;
-  font-size: 0.84rem;
-  line-height: 1.45;
-  color: #854d0e;
+  margin-top: 12px;
   font-weight: 600;
 }
 
 @media (max-width: 640px) {
-  .skin-cancer-impact-chart {
+  .chart-card {
     padding: 14px;
   }
 
-  .chart-wrap {
+  .chart-wrap,
+  .chart-state {
     height: 300px;
+    min-height: 300px;
   }
 
   .chart-subtitle {
@@ -276,6 +272,10 @@ onUnmounted(() => {
 
   .chart-note {
     font-size: 0.8rem;
+  }
+
+  .card-explanation {
+    font-size: 0.9rem;
   }
 }
 </style>

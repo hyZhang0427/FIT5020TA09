@@ -416,31 +416,105 @@ function handleSkinReset() {
 
 // ==== USER INTERACTIONS ====
 
-function requestLocationAndFetch() {
+async function getGeolocationPermissionState() {
+  try {
+    if ('permissions' in navigator && navigator.permissions?.query) {
+      const result = await navigator.permissions.query({ name: 'geolocation' })
+      return result.state
+    }
+  } catch (permissionError) {
+    console.warn('Unable to read geolocation permission state:', permissionError)
+  }
+
+  return 'unknown'
+}
+
+function getCurrentPositionSafely(options = {}) {
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        resolve({ ok: true, position })
+      },
+      (geoError) => {
+        switch (geoError.code) {
+          case geoError.PERMISSION_DENIED:
+            resolve({
+              ok: false,
+              reason: 'permission_denied',
+              notice: 'Location permission denied. Please allow access or choose a location manually.',
+            })
+            break
+          case geoError.POSITION_UNAVAILABLE:
+            resolve({
+              ok: false,
+              reason: 'position_unavailable',
+              notice: 'Location unavailable. Showing default UV for Melbourne CBD.',
+            })
+            break
+          case geoError.TIMEOUT:
+            resolve({
+              ok: false,
+              reason: 'geolocation_timeout',
+              notice: 'Location request timed out. Showing default UV for Melbourne CBD.',
+            })
+            break
+          default:
+            resolve({
+              ok: false,
+              reason: 'unknown_error',
+              notice: 'Unable to get your location. Showing default UV for Melbourne CBD.',
+            })
+        }
+      },
+      {
+        enableHighAccuracy: false,
+        maximumAge: 300000,
+        ...options,
+      },
+    )
+  })
+}
+
+async function requestLocationAndFetch() {
   if (!navigator.geolocation) {
     useFallbackLocation('Location unavailable. Showing default UV for Melbourne CBD.')
     return
   }
 
   loading.value = true
+  error.value = false
+  errorMessage.value = ''
+  fallbackNotice.value = ''
 
-  navigator.geolocation.getCurrentPosition(
-    (position) => {
-      const { latitude, longitude } = position.coords
-      isDenied.value = false
-      fallbackNotice.value = ''
-      fetchUVData(latitude, longitude)
-    },
-    (geoError) => {
-      isDenied.value = geoError.code === geoError.PERMISSION_DENIED
-      const notice =
-        geoError.code === geoError.PERMISSION_DENIED
-          ? 'Location permission denied. Showing default UV for Melbourne CBD.'
-          : 'Location unavailable. Showing default UV for Melbourne CBD.'
-      useFallbackLocation(notice)
-    },
-    { enableHighAccuracy: false, timeout: 4500, maximumAge: 300000 },
-  )
+  const permissionState = await getGeolocationPermissionState()
+
+  if (permissionState === 'denied') {
+    loading.value = false
+    isDenied.value = true
+    fallbackNotice.value = 'Location permission denied. Please allow access or choose a location manually.'
+    return
+  }
+
+  const geoOptions = permissionState === 'granted' ? { timeout: 15000 } : {}
+  const result = await getCurrentPositionSafely(geoOptions)
+
+  if (result.ok) {
+    const { latitude, longitude } = result.position.coords
+    isDenied.value = false
+    fallbackNotice.value = ''
+    fetchUVData(latitude, longitude)
+    return
+  }
+
+  if (result.reason === 'permission_denied') {
+    loading.value = false
+    isDenied.value = true
+    fallbackNotice.value = result.notice
+    return
+  }
+
+  isDenied.value = false
+  useFallbackLocation(result.notice)
 }
 
 function useFallbackLocation(notice = 'Showing default UV for Melbourne CBD.') {
