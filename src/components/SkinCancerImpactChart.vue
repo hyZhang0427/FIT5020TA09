@@ -186,8 +186,9 @@ async function fetchRiskData() {
   try {
     loading.value = true
     error.value = ''
-
-    const response = await fetch('http://localhost:3001/api/skin-cancer-stats')
+    
+    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
+    const response = await fetch(`${API_BASE_URL}/api/skin-cancer-stats`)
     if (!response.ok) {
       throw new Error(`Failed to fetch skin cancer stats (${response.status})`)
     }

@@ -192,7 +192,8 @@ async function fetchTrendData() {
     loading.value = true
     error.value = ''
 
-    const response = await fetch('http://localhost:3001/api/uv-trends')
+    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
+    const response = await fetch(`${API_BASE_URL}/api/uv-trends`)
     if (!response.ok) {
       throw new Error(`Failed to fetch UV trends (${response.status})`)
     }
