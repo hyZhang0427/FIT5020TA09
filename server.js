@@ -25,6 +25,10 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
 })
 
+app.get('/', (req, res) => {
+  res.status(200).send('OK')
+})
+
 app.get('/api/health', (req, res) => {
   res.json({
     ok: true,

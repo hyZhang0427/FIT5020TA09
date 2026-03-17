@@ -45,8 +45,10 @@ function buildChart() {
   const labels = trendData.value.map(
     (d) => `${d.year}-${String(d.month).padStart(2, '0')}`
   )
-  const uvData = trendData.value.map((d) => d.uv)
-  const heatData = trendData.value.map((d) => d.heat)
+  const uvData = trendData.value.map((d) => Number(d.uv))
+  const heatData = trendData.value.map((d) =>
+    d.heat === null ? null : Number(d.heat)
+  )
 
   const peakIndices = trendData.value
     .map((d, i) => (d.isPeakUv ? i : null))
@@ -193,6 +195,7 @@ async function fetchTrendData() {
     error.value = ''
 
     const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
+    console.log('API base URL:', import.meta.env.VITE_API_BASE_URL)
     const response = await fetch(`${API_BASE_URL}/api/uv-trends`)
     if (!response.ok) {
       throw new Error(`Failed to fetch UV trends (${response.status})`)

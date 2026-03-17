@@ -41,9 +41,9 @@ function buildChart() {
   destroyChart()
 
   const labels = riskData.value.map((d) => d.year)
-  const age30Data = riskData.value.map((d) => d.age30)
-  const age60Data = riskData.value.map((d) => d.age60)
-  const lifetimeData = riskData.value.map((d) => d.lifetime)
+  const age30Data = riskData.value.map((d) => Number(d.age30))
+  const age60Data = riskData.value.map((d) => Number(d.age60))
+  const lifetimeData = riskData.value.map((d) => Number(d.lifetime))
 
   const ctx = canvasRef.value.getContext('2d')
 
@@ -188,6 +188,7 @@ async function fetchRiskData() {
     error.value = ''
     
     const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
+    console.log('API base URL:', import.meta.env.VITE_API_BASE_URL)
     const response = await fetch(`${API_BASE_URL}/api/skin-cancer-stats`)
     if (!response.ok) {
       throw new Error(`Failed to fetch skin cancer stats (${response.status})`)
